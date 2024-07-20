@@ -10,7 +10,7 @@ extern crate serde_schema_derive;
 use std::collections::BTreeMap;
 
 use gob::StreamSerializer;
-use serde_bytes::Bytes;
+use serde_bytes::{ByteBuf, Bytes};
 
 #[test]
 fn bool_true() {
@@ -276,7 +276,7 @@ fn bytes_empty() {
     let mut buffer = Vec::new();
     {
         let mut stream = StreamSerializer::new_with_write(&mut buffer);
-        stream.serialize(&Bytes::new(&[])).unwrap();
+        stream.serialize(&ByteBuf::from(vec![])).unwrap();
     }
     assert_eq!(buffer, &[3, 10, 0, 0]);
 }
@@ -541,7 +541,7 @@ fn option_none_to_empty_values() {
         stream.serialize::<Option<i64>>(&None).unwrap();
         stream.serialize::<Option<f64>>(&None).unwrap();
         stream.serialize::<Option<String>>(&None).unwrap();
-        stream.serialize::<Option<Bytes>>(&None).unwrap();
+        stream.serialize::<Option<ByteBuf>>(&None).unwrap();
         stream.serialize::<Option<Vec<bool>>>(&None).unwrap();
     }
     assert_eq!(
@@ -560,7 +560,7 @@ fn option_some_to_non_empty_values() {
         stream.serialize(&Some(42i64)).unwrap();
         stream.serialize(&Some(42f64)).unwrap();
         stream.serialize(&Some("foo")).unwrap();
-        stream.serialize(&Some(Bytes::new(&[0x1, 0x2]))).unwrap();
+        stream.serialize(&Some(ByteBuf::from(vec![0x1, 0x2]))).unwrap();
         stream.serialize(&Some(vec![true, false])).unwrap();
     }
     assert_eq!(

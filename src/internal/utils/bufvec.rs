@@ -1,7 +1,6 @@
-use std::collections::VecDeque;
+use std::{collections::VecDeque, io::IoSlice};
 
-use bytes::{Buf, IntoBuf};
-use iovec::IoVec;
+use bytes::Buf;
 
 pub struct BufVec<B> {
     remaining: usize,
@@ -18,9 +17,9 @@ impl<B: Buf> BufVec<B> {
 
     pub fn push<T>(&mut self, value: T)
     where
-        T: IntoBuf<Buf = B>,
+        T: Into<B>,
     {
-        let buf = value.into_buf();
+        let buf = value.into();
         if buf.remaining() > 0 {
             self.remaining += buf.remaining();
             self.bufs.push_back(buf)
@@ -33,9 +32,9 @@ impl<B: Buf> Buf for BufVec<B> {
         self.remaining
     }
 
-    fn bytes(&self) -> &[u8] {
+    fn chunk(&self) -> &[u8] {
         if let Some(buf) = self.bufs.front() {
-            buf.bytes()
+            buf.chunk()
         } else {
             &[]
         }
@@ -60,12 +59,12 @@ impl<B: Buf> Buf for BufVec<B> {
         }
     }
 
-    fn bytes_vec<'a>(&'a self, dst: &mut [&'a IoVec]) -> usize {
+    fn chunks_vectored<'a>(&'a self, dst: &mut [IoSlice<'a>]) -> usize {
         let mut dst_idx = 0;
         let mut buf_idx = 0;
         while dst_idx < dst.len() {
             if let Some(buf) = self.bufs.get(buf_idx) {
-                dst_idx += buf.bytes_vec(&mut dst[dst_idx..]);
+                dst_idx += buf.chunks_vectored(&mut dst[dst_idx..]);
                 buf_idx += 1;
             } else {
                 break;
@@ -73,26 +72,33 @@ impl<B: Buf> Buf for BufVec<B> {
         }
         dst_idx
     }
+
 }
 
 #[cfg(test)]
 mod tests {
-    use std::io::Cursor;
+    use std::io::IoSlice;
 
-    use bytes::{Buf, BufMut};
-    use iovec::IoVec;
+    // use std::io::Cursor;
+    use bytes::{Buf, Bytes};
 
     use super::BufVec;
 
     quickcheck! {
         fn push_and_collect(chunks: Vec<Vec<u8>>) -> bool {
-            let mut bv = BufVec::new();
+            let mut bv = BufVec::<Bytes>::new();
             let mut bytes = Vec::new();
             for chunk in chunks {
-                bytes.put_slice(&chunk);
-                bv.push(Cursor::new(chunk));
+                bytes.extend_from_slice(&chunk);
+                bv.push(Bytes::from(chunk));
             }
-            let collected = bv.collect::<Vec<_>>();
+
+            let mut collected = Vec::new();
+            while bv.has_remaining() {
+                let chunk = bv.chunk();
+                collected.extend_from_slice(chunk);
+                bv.advance(chunk.len());
+            }
 
             bytes == collected
         }
@@ -100,11 +106,11 @@ mod tests {
 
     quickcheck! {
         fn push_and_concat_iovec(chunks: Vec<Vec<u8>>, lens: Vec<u8>) -> bool {
-            let mut bv = BufVec::new();
+            let mut bv = BufVec::<Bytes>::new();
             let mut bytes = Vec::new();
             for chunk in chunks {
-                bytes.put_slice(&chunk);
-                bv.push(Cursor::new(chunk));
+                bytes.extend_from_slice(&chunk);
+                bv.push(Bytes::from(chunk));
             }
 
             let mut total = 0;
@@ -112,11 +118,11 @@ mod tests {
             for len in lens {
                 let mut num = 0;
                 {
-                    let mut vecs = vec![IoVec::from_bytes(&[0u8]).unwrap(); len as usize];
-                    let n = bv.bytes_vec(&mut vecs);
+                    let mut vecs = vec![IoSlice::new(&[0u8]); len as usize];
+                    let n = bv.chunks_vectored(&mut vecs);
                     for vec in &vecs[..n] {
                         num += vec.len();
-                        collected.put_slice(vec);
+                        collected.extend_from_slice(vec);
                     }
                 }
                 {

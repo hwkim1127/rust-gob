@@ -106,7 +106,7 @@ impl<B: BufMut> Message<B> {
         } else {
             let nbytes = 8 - (n.leading_zeros() / 8) as u8;
             self.buf.put_u8(!(nbytes - 1));
-            self.buf.put_uint_be(n, nbytes as usize);
+            self.buf.put_uint(n, nbytes as usize);
         }
     }
 
@@ -205,7 +205,7 @@ impl<Io: Read> Stream<Io> {
             }
         }
         loop {
-            match self.parse_section(buf.bytes()) {
+            match self.parse_section(buf.as_slice()) {
                 Ok(header) => {
                     return Ok(Some(header));
                 }

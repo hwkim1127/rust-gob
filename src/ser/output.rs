@@ -1,7 +1,6 @@
-use std::io::{Cursor, Write};
+use std::io::{IoSlice, Write};
 
-use bytes::Buf;
-use iovec::IoVec;
+use bytes::{Buf, BytesMut};
 
 use internal::gob::Message;
 use internal::utils::BufVec;
@@ -19,9 +18,12 @@ impl OutputPart {
     pub(crate) fn new(buf: Vec<u8>) -> Self {
         let mut len_buf = [0u8; 9];
         let len_buf_len = {
-            let mut len_msg = Message::new(Cursor::new(&mut len_buf));
+            let mut bytes = BytesMut::with_capacity(9);
+            let mut len_msg = Message::new(&mut bytes);
             len_msg.write_uint(buf.len() as u64);
-            len_msg.get_ref().position() as u8
+            let length = bytes.len();
+            len_buf[..length].copy_from_slice(&bytes);
+            length as u8
         };
 
         OutputPart {
@@ -38,7 +40,7 @@ impl Buf for OutputPart {
         (self.len_buf_len as usize + self.buf.len()) - self.pos
     }
 
-    fn bytes(&self) -> &[u8] {
+    fn chunk(&self) -> &[u8] {
         if self.pos < self.len_buf_len as usize {
             &self.len_buf[self.pos..self.len_buf_len as usize]
         } else {
@@ -50,16 +52,16 @@ impl Buf for OutputPart {
         self.pos += cnt;
     }
 
-    fn bytes_vec<'a>(&'a self, dst: &mut [&'a IoVec]) -> usize {
+    fn chunks_vectored<'a>(&'a self, dst: &mut [IoSlice<'a>]) -> usize {
         let mut pos = self.pos;
         let mut idx = 0;
         if idx < dst.len() && pos < self.len_buf_len as usize {
-            dst[idx] = IoVec::from_bytes(&self.len_buf[pos..self.len_buf_len as usize]).unwrap();
+            dst[idx] = IoSlice::new(&self.len_buf[pos..self.len_buf_len as usize]);
             idx += 1;
             pos = self.len_buf_len as usize;
         }
         if idx < dst.len() && pos < self.len_buf_len as usize + self.buf.len() {
-            dst[idx] = IoVec::from_bytes(&self.buf[pos - self.len_buf_len as usize..]).unwrap();
+            dst[idx] = IoSlice::new(&self.buf[pos - self.len_buf_len as usize..]);
             idx += 1;
         }
         idx
@@ -100,16 +102,16 @@ impl Buf for OutputBuffer {
         self.inner.remaining()
     }
 
-    fn bytes(&self) -> &[u8] {
-        self.inner.bytes()
+    fn chunk(&self) -> &[u8] {
+        self.inner.chunk()
     }
 
     fn advance(&mut self, cnt: usize) {
         self.inner.advance(cnt)
     }
 
-    fn bytes_vec<'a>(&'a self, dst: &mut [&'a IoVec]) -> usize {
-        self.inner.bytes_vec(dst)
+    fn chunks_vectored<'a>(&'a self, dst: &mut [IoSlice<'a>]) -> usize {
+        self.inner.chunks_vectored(dst)
     }
 }
 
@@ -142,11 +144,9 @@ impl<W: Write> Output for OutputWrite<W> {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Read;
-    use std::ops::Deref;
+    use std::{io::IoSlice, ops::Deref};
 
     use bytes::Buf;
-    use iovec::IoVec;
     use partial_io::{GenNoErrors, PartialRead, PartialWithErrors};
 
     use internal::gob::Message;
@@ -156,7 +156,7 @@ mod tests {
     #[test]
     fn part_collect() {
         let part = OutputPart::new(vec![84, 1, 2, 3, 4, 5, 6]);
-        assert_eq!(part.collect::<Vec<_>>(), vec![7, 84, 1, 2, 3, 4, 5, 6])
+        assert_eq!(part.buf, vec![7, 84, 1, 2, 3, 4, 5, 6])
     }
 
     quickcheck! {
@@ -180,8 +180,8 @@ mod tests {
         let mut part = OutputPart::new(vec![84, 1, 2, 3, 4, 5, 6]);
 
         {
-            let mut vecs = vec![IoVec::from_bytes(&[0]).unwrap(); 3];
-            let n = part.bytes_vec(vecs.as_mut_slice());
+            let mut vecs = vec![IoSlice::new(&[0]); 3];
+            let n = part.chunks_vectored(vecs.as_mut_slice());
             assert_eq!(n, 2);
             assert_eq!(vecs[0].deref(), &[7]);
             assert_eq!(vecs[1].deref(), &[84, 1, 2, 3, 4, 5, 6]);
@@ -190,8 +190,8 @@ mod tests {
         part.advance(1);
 
         {
-            let mut vecs = vec![IoVec::from_bytes(&[0]).unwrap(); 3];
-            let n = part.bytes_vec(vecs.as_mut_slice());
+            let mut vecs = vec![IoSlice::new(&[0]); 3];
+            let n = part.chunks_vectored(vecs.as_mut_slice());
             assert_eq!(n, 1);
             assert_eq!(vecs[0].deref(), &[84, 1, 2, 3, 4, 5, 6]);
         }
@@ -199,8 +199,8 @@ mod tests {
         part.advance(1);
 
         {
-            let mut vecs = vec![IoVec::from_bytes(&[0]).unwrap(); 3];
-            let n = part.bytes_vec(vecs.as_mut_slice());
+            let mut vecs = vec![IoSlice::new(&[0]); 3];
+            let n = part.chunks_vectored(vecs.as_mut_slice());
             assert_eq!(n, 1);
             assert_eq!(vecs[0].deref(), &[1, 2, 3, 4, 5, 6]);
         }

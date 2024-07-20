@@ -58,7 +58,7 @@ impl<R> StreamDeserializer<R> {
             };
 
             if header.type_id >= 0 {
-                let slice = &self.buffer.bytes()[header.payload_range.clone()];
+                let slice = &self.buffer.as_slice()[header.payload_range.clone()];
                 let msg = Message::new(Cursor::new(slice));
                 self.prev_len = header.payload_range.end;
                 return Ok(Some(Deserializer {
@@ -69,7 +69,7 @@ impl<R> StreamDeserializer<R> {
             }
 
             let wire_type = {
-                let slice = &self.buffer.bytes()[header.payload_range.clone()];
+                let slice = &self.buffer.as_slice()[header.payload_range.clone()];
                 let mut msg = Message::new(Cursor::new(slice));
                 let de = FieldValueDeserializer::new(TypeId::WIRE_TYPE, &self.defs, &mut msg);
                 WireType::deserialize(de)

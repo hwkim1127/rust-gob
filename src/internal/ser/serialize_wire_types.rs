@@ -107,7 +107,7 @@ impl<'a> SerializeWireTypes<'a> {
                     let mut ctx = SerializationCtx::with_schema(Schema::new());
                     ctx.value.write_int(-next_id.0);
                     let ok = {
-                        let mut ser = FieldValueSerializer {
+                        let ser = FieldValueSerializer {
                             ctx,
                             type_id: TypeId::WIRE_TYPE,
                         };

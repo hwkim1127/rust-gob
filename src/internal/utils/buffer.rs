@@ -62,9 +62,14 @@ impl Buf for Buffer {
     }
 
     #[inline]
-    fn bytes(&self) -> &[u8] {
+    fn chunk(&self) -> &[u8] {
         self.as_slice()
     }
+
+    // #[inline]
+    // fn bytes(&self) -> &[u8] {
+    //     self.as_slice()
+    // }
 
     #[inline]
     fn advance(&mut self, cnt: usize) {
